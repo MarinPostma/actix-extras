@@ -30,7 +30,7 @@ pub struct CorsMiddleware<S> {
 }
 
 impl<S> CorsMiddleware<S> {
-    fn handle_preflight<B>(inner: &Inner, req: ServiceRequest) -> ServiceResponse<B> {
+    fn handle_preflight(inner: &Inner, req: ServiceRequest) -> ServiceResponse {
         if let Err(err) = inner
             .validate_origin(req.head())
             .and_then(|_| inner.validate_allowed_method(req.head()))
@@ -75,7 +75,7 @@ impl<S> CorsMiddleware<S> {
         }
 
         let res = res.finish();
-        let res = res.into_body();
+
         req.into_response(res)
     }
 
@@ -118,20 +118,19 @@ impl<S> CorsMiddleware<S> {
     }
 }
 
-type CorsMiddlewareServiceFuture<B> = Either<
-    Ready<Result<ServiceResponse<B>, Error>>,
-    LocalBoxFuture<'static, Result<ServiceResponse<B>, Error>>,
+type CorsMiddlewareServiceFuture = Either<
+    Ready<Result<ServiceResponse, Error>>,
+    LocalBoxFuture<'static, Result<ServiceResponse, Error>>,
 >;
 
-impl<S, B> Service<ServiceRequest> for CorsMiddleware<S>
+impl<S> Service<ServiceRequest> for CorsMiddleware<S>
 where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S: Service<ServiceRequest, Response = ServiceResponse, Error = Error>,
     S::Future: 'static,
-    B: 'static,
 {
-    type Response = ServiceResponse<B>;
+    type Response = ServiceResponse;
     type Error = Error;
-    type Future = CorsMiddlewareServiceFuture<B>;
+    type Future = CorsMiddlewareServiceFuture;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
@@ -188,7 +187,7 @@ mod tests {
         // Tests case where allowed_origins is All but there are validate functions to run incase.
         // In this case, origins are only allowed when the DNT header is sent.
 
-        let mut cors = Cors::default()
+        let cors = Cors::default()
             .allow_any_origin()
             .allowed_origin_fn(|origin, req_head| {
                 assert_eq!(&origin, req_head.headers.get(header::ORIGIN).unwrap());
@@ -200,7 +199,7 @@ mod tests {
             .unwrap();
 
         let req = TestRequest::get()
-            .header(header::ORIGIN, "http://example.com")
+            .insert_header((header::ORIGIN, "http://example.com"))
             .to_srv_request();
         let res = cors.call(req).await.unwrap();
         assert_eq!(
@@ -211,8 +210,8 @@ mod tests {
         );
 
         let req = TestRequest::get()
-            .header(header::ORIGIN, "http://example.com")
-            .header(header::DNT, "1")
+            .insert_header((header::ORIGIN, "http://example.com"))
+            .insert_header((header::DNT, "1"))
             .to_srv_request();
         let res = cors.call(req).await.unwrap();
         assert_eq!(
